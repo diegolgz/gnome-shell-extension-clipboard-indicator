@@ -16,8 +16,6 @@ import { DialogManager } from './confirmDialog.js';
 import { PrefsFields } from './constants.js';
 import { Keyboard } from './keyboard.js';
 
-const CLIPBOARD_TYPE = St.ClipboardType.CLIPBOARD;
-
 const INDICATOR_ICON = 'edit-paste-symbolic';
 
 let DELAYED_SELECTION_TIMEOUT = 750;
@@ -61,6 +59,7 @@ const ClipboardIndicator = GObject.registerClass({
     GTypeName: 'ClipboardIndicator'
 }, class ClipboardIndicator extends PanelMenu.Button {
     #refreshInProgress = false;
+    #lastMouseButtonPressed = 1;
 
     destroy () {
         this._disconnectSettings();
@@ -153,6 +152,10 @@ const ClipboardIndicator = GObject.registerClass({
                 });
             }
         }
+    }
+
+    _getClipboardType() {
+        return this.#lastMouseButtonPressed == 2 ? St.ClipboardType.PRIMARY : St.ClipboardType.CLIPBOARD;
     }
 
     async _buildMenu () {
@@ -464,6 +467,12 @@ const ClipboardIndicator = GObject.registerClass({
                 this.#pasteItem(menuItem);
             }
         })
+        menuItem.actor.connect('captured-event', (actor, event) => {
+            if (event.type() == Clutter.EventType.BUTTON_PRESS) {
+                this.#lastMouseButtonPressed = event.get_button();
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
 
         this._setEntryLabel(menuItem);
         this.clipItemsRadioGroup.push(menuItem);
@@ -1102,12 +1111,13 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     #clearClipboard () {
-        this.extension.clipboard.set_text(CLIPBOARD_TYPE, "");
+        this.extension.clipboard.set_text(St.ClipboardType.PRIMARY, "");
+        this.extension.clipboard.set_text(St.ClipboardType.CLIPBOARD, "");
         this.#updateIndicatorContent(null);
     }
 
     #updateClipboard (entry) {
-        this.extension.clipboard.set_content(CLIPBOARD_TYPE, entry.mimetype(), entry.asBytes());
+        this.extension.clipboard.set_content(this._getClipboardType(), entry.mimetype(), entry.asBytes());
         this.#updateIndicatorContent(entry);
     }
 
@@ -1125,7 +1135,8 @@ const ClipboardIndicator = GObject.registerClass({
         ];
 
         for (let type of mimetypes) {
-            let result = await new Promise(resolve => this.extension.clipboard.get_content(CLIPBOARD_TYPE, type, (clipBoard, bytes) => {
+            // Only contents from CLIPBOARD not from PRIMARY are get to get the clipboard contents.
+            let result = await new Promise(resolve => this.extension.clipboard.get_content(St.ClipboardType.CLIPBOARD, type, (clipBoard, bytes) => {
                 if (bytes === null || bytes.get_size() === 0) {
                     resolve(null);
                     return;
